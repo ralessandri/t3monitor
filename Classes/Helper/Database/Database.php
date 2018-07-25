@@ -32,7 +32,7 @@
  * @package T3Monitor
  * @subpackage Helper
  */
-class Tx_T3monitor_Helper_Database
+class Tx_T3monitor_Helper_Database implements Tx_T3monitor_Helper_DatabaseInterface
 {
     /**
      * Singleton instance
@@ -56,31 +56,13 @@ class Tx_T3monitor_Helper_Database
     /**
      * Default constructor
      */
-    private function __construct()
+    public function __construct()
     {
         $this->init();
     }
     private function init()
     {
-        $comp = Tx_T3monitor_Service_Compatibility::getInstance();
-        $t3ver = $comp->int_from_ver(TYPO3_version);
-        if ($t3ver >= 6000000) {
-            // Starting from TYPO3 6.1, the database will connect itself when needed
-            if ($t3ver < 6001000) {
-                require_once \TYPO3\CMS\Core\Utility\ExtensionManagementUtility::extPath('frontend')
-                    . 'Classes/Utility/EidUtility.php';
-                \TYPO3\CMS\Frontend\Utility\EidUtility::connectDB();
-            }
-            $this->isConnected = true;
-        // >= TYPO3 4.3
-        } elseif($t3ver >= 4003000){
-            $this->isConnected = tslib_eidtools::connectDB();
-        // <= TYPO3 4.2
-        } else {
-            //If connection fails, die is called in t3lib_db::connectDB
-            tslib_eidtools::connectDB();
-            $this->isConnected = true;
-        }
+        $this->isConnected = true;
     }
 
     /**
@@ -167,10 +149,18 @@ class Tx_T3monitor_Helper_Database
      */
     public function getTablesInfo()
     {
-        if ($this->tableInfo === null) {
-            $db = $this->getDatabaseConnection();
-            $this->tableInfo = $db->admin_get_tables();
+        $cp = \TYPO3\CMS\Core\Utility\GeneralUtility::makeInstance(\TYPO3\CMS\Core\Database\ConnectionPool::class);
+        $defaultConnection = $cp->getConnectionByName(\TYPO3\CMS\Core\Database\ConnectionPool::DEFAULT_CONNECTION_NAME);
+
+        $queryBuilder = $defaultConnection->createQueryBuilder();
+        $queryBuilder->select('TABLE_NAME AS Table', 'TABLE_ROWS AS Rows', 'DATA_LENGTH AS Data_length')
+            ->from('information_schema.TABLES');
+        $tables = $queryBuilder->execute()->fetchAll();
+        $correctedTables = [];
+        foreach ($tables as $table) {
+            $correctedTables[$table['Table']] = $table;
         }
+        $this->tableInfo = $correctedTables;
         return $this->tableInfo;
     }
 
@@ -186,11 +176,17 @@ class Tx_T3monitor_Helper_Database
      */
     public function fetchRow($select, $from, $where, $orderBy = '')
     {
-        $db = $this->getDatabaseConnection();
-        $dbRes = $db->exec_SELECTquery($select, $from, $where, '', $orderBy);
-        $record = $db->sql_fetch_assoc($dbRes);
-        $db->sql_free_result($dbRes);
-        return $record;
+        /** @var \TYPO3\CMS\Core\Database\Query\QueryBuilder $queryBuilder */
+        $queryBuilder = \TYPO3\CMS\Core\Utility\GeneralUtility::makeInstance(\TYPO3\CMS\Core\Database\ConnectionPool::class)->getQueryBuilderForTable($from);
+        $queryBuilder->resetRestrictions();
+        $select = explode(', ', $select);
+        $statement = $queryBuilder
+            ->select(...$select)
+            ->from($from)
+            ->where($where)
+            ->execute();
+        $result = $statement->fetch();
+        return $result;
     }
 
     /**
@@ -206,13 +202,20 @@ class Tx_T3monitor_Helper_Database
      */
     public function fetchList($select, $from, $where, $orderBy, $limit = '')
     {
-        $db = $this->getDatabaseConnection();
-        $dbRes = $db->exec_SELECTquery($select, $from, $where, '', $orderBy, $limit);
-        $records = array();
-        while ($record = $db->sql_fetch_assoc($dbRes)) {
-            $records[] = $record;
+        /** @var \TYPO3\CMS\Core\Database\Query\QueryBuilder $queryBuilder */
+        $queryBuilder = \TYPO3\CMS\Core\Utility\GeneralUtility::makeInstance(\TYPO3\CMS\Core\Database\ConnectionPool::class)->getQueryBuilderForTable($from);
+        $queryBuilder->resetRestrictions();
+        $select = explode(', ', $select);
+        $orderBy = explode(' ', $orderBy);
+        $statement = $queryBuilder
+            ->select(...$select)
+            ->from($from)
+            ->where($where)
+            ->orderBy(...$orderBy);
+        if ($limit !== '') {
+            $statement->setMaxResults($limit);
         }
-        $db->sql_free_result($dbRes);
+        $records = $statement->execute()->fetchAll();
         return $records;
     }
 
@@ -226,34 +229,29 @@ class Tx_T3monitor_Helper_Database
      */
     public function fullQuoteStr($string, $table)
     {
-        return $this->getDatabaseConnection()->fullQuoteStr($string, $table);
+         return '\''.$string. '\'';
     }
 
     /**
      * Return the requested database variable
+     * In this case only returns server version, because its the only thing needed
      *
      * @param string $variableName
      * @return string|null
      */
     public function getDatabaseVariable($variableName)
     {
-        $db = $this->getDatabaseConnection();
-        $resource = $db->sql_query('SHOW VARIABLES LIKE \''.$variableName.'\';');
-        if ($resource !== false) {
-            $result = $db->sql_fetch_row($resource);
-            if (isset($result[1])) {
-                return $result[1];
-            }
-        }
-        return null;
+        $cp = \TYPO3\CMS\Core\Utility\GeneralUtility::makeInstance(\TYPO3\CMS\Core\Database\ConnectionPool::class);
+        $defaultConnection = $cp->getConnectionByName(\TYPO3\CMS\Core\Database\ConnectionPool::DEFAULT_CONNECTION_NAME);
+        $result = $defaultConnection->getServerVersion();
+        return $result;
     }
 
     /**
      * @internal
-     * @return \TYPO3\CMS\Core\Database\DatabaseConnection $database
      */
     public function getDatabaseConnection()
     {
-        return $GLOBALS['TYPO3_DB'];
+        return $GLOBALS['TYPO3_DB']; //NOT USED HERE
     }
 }
