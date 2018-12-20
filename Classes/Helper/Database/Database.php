@@ -26,7 +26,8 @@
  * ************************************************************* */
 /**
  * Helper class for database access. Implements singleton pattern.
- * (t3lib_Singleton interface not used for compatibility with TYPO3 4.2)
+ * (t3lib_Singleton interface not used for compatibility with TYPO3 4.2
+ * This class required PHP >= 5.5
  *
  * @category TYPO3
  * @package T3Monitor
@@ -183,10 +184,10 @@ class Tx_T3monitor_Helper_Database implements Tx_T3monitor_Helper_DatabaseInterf
         $statement = $queryBuilder;
 //          ->select(...$select) // Cant use this because we need to ensure that the extension also works with < PHP5.6
         call_user_func_array(array($statement,'select'), $select);
-        $statement->from($from)
+        $queryResult = $statement->from($from)
             ->where($where)
             ->execute();
-        $result = $statement->fetch();
+        $result = $queryResult->fetch();
         return $result;
     }
 
